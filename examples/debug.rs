@@ -18,13 +18,12 @@ const MAX_BUF_SIZE: usize = 2048;
 async fn main() -> Result<()> {
     env_logger::init();
 
-
     let backend = Arc::new(Mutex::new(DebugBackend::new()));
-    
+
     let listener = TcpListener::bind(format!("0.0.0.0:{}", PORT))
         .await
         .context("Failed to bind to port")?;
-    
+
     info!("Waiting for connections on port {}...", PORT);
 
     loop {
@@ -48,7 +47,7 @@ async fn main() -> Result<()> {
 async fn handle_connection(mut stream: TcpStream, backend: Arc<Mutex<dyn Backend>>) -> Result<()> {
     let mut buf = [0u8; MAX_BUF_SIZE];
     let mut count = 0;
-    
+
     loop {
         let n = stream.read(&mut buf[count..]).await?;
         if n == 0 {
@@ -60,33 +59,34 @@ async fn handle_connection(mut stream: TcpStream, backend: Arc<Mutex<dyn Backend
 
         let mut processed_bytes = 0;
         while processed_bytes < count {
-            let (response, bytes_read) = process_command(&buf[processed_bytes..count], &backend).await?;
+            let (response, bytes_read) =
+                process_command(&buf[processed_bytes..count], &backend).await?;
             if bytes_read == 0 {
                 // Non ci sono abbastanza dati per un comando completo
                 break;
             }
-            
+
             processed_bytes += bytes_read;
-            
 
             let response_bytes = response.to_bytes();
 
             debug!("tx {:x?}", &response_bytes);
 
-
-
-
             match response {
                 ProtocolResponse::Read { header, data } => {
-                    info!("read at addr 0x{:04x} size {:?} resp {:02x?}", header.param_addr, header.data_len, data);
+                    info!(
+                        "read at addr 0x{:04x} size {:?} resp {:02x?}",
+                        header.param_addr, header.data_len, data
+                    );
 
                     stream.write_all(&response_bytes).await?;
                     stream.flush().await?;
-
-
                 }
                 ProtocolResponse::Write { header } => {
-                    info!("write at addr 0x{:04x} size {:?}", header.param_addr, header.data_len);
+                    info!(
+                        "write at addr 0x{:04x} size {:?}",
+                        header.param_addr, header.data_len
+                    );
                 }
                 ProtocolResponse::Error(e) => {
                     error!("Protocol error: {e}");
@@ -95,9 +95,8 @@ async fn handle_connection(mut stream: TcpStream, backend: Arc<Mutex<dyn Backend
             }
 
             println!();
-
         }
-        
+
         // Sposta i dati non processati all'inizio del buffer
         if processed_bytes > 0 {
             if processed_bytes < count {
@@ -106,13 +105,16 @@ async fn handle_connection(mut stream: TcpStream, backend: Arc<Mutex<dyn Backend
             count -= processed_bytes;
         }
     }
-    
+
     Ok(())
 }
 
-async fn process_command(buf: &[u8], backend: &Arc<Mutex<dyn Backend>>) -> Result<(ProtocolResponse, usize)> {
+async fn process_command(
+    buf: &[u8],
+    backend: &Arc<Mutex<dyn Backend>>,
+) -> Result<(ProtocolResponse, usize)> {
     let parse_result = ProtocolHandler::parse_command(buf);
-    
+
     match parse_result {
         Ok((command, bytes_read)) => {
             debug!("Parsed command: {:?}", command);
@@ -141,19 +143,25 @@ async fn process_command(buf: &[u8], backend: &Arc<Mutex<dyn Backend>>) -> Resul
                 }
                 ProtocolCommand::Unknown(cmd) => {
                     error!("Unknown command: 0x{:02x}", cmd);
-                    ProtocolHandler::create_error_response(format!("Unknown command: 0x{:02x}", cmd))
+                    ProtocolHandler::create_error_response(format!(
+                        "Unknown command: 0x{:02x}",
+                        cmd
+                    ))
                 }
             };
-            
+
             Ok((response, bytes_read))
-        },
+        }
         Err(e) if buf.len() < 3 => {
             // Non ci sono abbastanza dati per un comando completo
             Ok((ProtocolResponse::Error("Incomplete command".to_string()), 0))
-        },
+        }
         Err(e) => {
             error!("Failed to parse command: {}", e);
-            Ok((ProtocolHandler::create_error_response(format!("Parse error: {}", e)), 0))
+            Ok((
+                ProtocolHandler::create_error_response(format!("Parse error: {}", e)),
+                0,
+            ))
         }
     }
 }

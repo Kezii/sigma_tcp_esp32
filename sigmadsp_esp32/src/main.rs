@@ -50,7 +50,7 @@ fn main() -> Result<()> {
 
     let peripherals = Peripherals::take().unwrap();
 
-    let _wifi = match my_wifi("🦊", "Foxo//Lab", peripherals.modem, sysloop) {
+    let _wifi = match my_wifi(peripherals.modem, sysloop) {
         Ok(inner) => inner,
         Err(err) => {
             bail!("Could not connect to Wi-Fi network: {:?}", err)
@@ -141,12 +141,18 @@ fn tcp_server(i2c: I2cDriver<'static>) -> Result<(), io::Error> {
 
                         match response {
                             ProtocolResponse::Read { header, data } => {
-                                info!("read at addr 0x{:04x} size {:?} resp {:02x?}", header.param_addr, header.data_len, data);
+                                info!(
+                                    "read at addr 0x{:04x} size {:?} resp {:02x?}",
+                                    header.param_addr, header.data_len, data
+                                );
                                 stream.write_all(&response_bytes).unwrap();
                                 stream.flush().unwrap();
                             }
                             ProtocolResponse::Write { header } => {
-                                info!("write at addr 0x{:04x} size {:?}", header.param_addr, header.data_len);
+                                info!(
+                                    "write at addr 0x{:04x} size {:?}",
+                                    header.param_addr, header.data_len
+                                );
                             }
                             ProtocolResponse::Error(e) => {
                                 error!("Protocol error: {e}");
@@ -202,17 +208,15 @@ fn process_command(
                     // Ora leggi i dati dal DSP
                     let mut data = vec![0u8; header.data_len as usize];
                     match i2c.read(DSP_I2C_ADDR, &mut data, BLOCK) {
-                        Ok(_) => {
-                            Ok((
-                                ProtocolHandler::create_read_response(
-                                    header.chip_addr,
-                                    header.data_len,
-                                    header.param_addr,
-                                    data,
-                                ),
-                                bytes_read,
-                            ))
-                        }
+                        Ok(_) => Ok((
+                            ProtocolHandler::create_read_response(
+                                header.chip_addr,
+                                header.data_len,
+                                header.param_addr,
+                                data,
+                            ),
+                            bytes_read,
+                        )),
                         Err(e) => {
                             error!("I2C read failed: {:?}", e);
                             Ok((
@@ -249,16 +253,14 @@ fn process_command(
             write_buf.extend_from_slice(&data);
 
             match i2c.write(DSP_I2C_ADDR, &write_buf, BLOCK) {
-                Ok(_) => {
-                    Ok((
-                        ProtocolHandler::create_write_response(
-                            header.chip_addr,
-                            header.data_len,
-                            header.param_addr,
-                        ),
-                        bytes_read,
-                    ))
-                }
+                Ok(_) => Ok((
+                    ProtocolHandler::create_write_response(
+                        header.chip_addr,
+                        header.data_len,
+                        header.param_addr,
+                    ),
+                    bytes_read,
+                )),
                 Err(e) => {
                     error!("I2C write failed: {:?}", e);
                     Ok((
