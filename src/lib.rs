@@ -92,9 +92,7 @@ pub enum ProtocolResponse {
         header: ResponseHeader,
         data: Vec<u8>,
     },
-    Write {
-        header: ResponseHeader,
-    },
+    Write,
     Error(String),
 }
 
@@ -140,37 +138,12 @@ impl ProtocolResponse {
 
                 bytes
             }
-            ProtocolResponse::Write { header } => {
-                // Per le risposte di scrittura, creiamo un header di 13 byte
-                let mut bytes = Vec::with_capacity(13);
-
-                // 1. Control bit (1 byte)
-                bytes.push(CMD_RESP);
-
-                // 2. Total len (4 byte, big-endian): 13 byte per l'header
-                let total_len: u32 = 13;
-                bytes.extend_from_slice(&total_len.to_be_bytes());
-
-                // 3. Chip addr (1 byte)
-                bytes.push(header.chip_addr);
-
-                // 4. Data len (4 byte, big-endian)
-                bytes.extend_from_slice(&header.data_len.to_be_bytes());
-
-                // 5. Param addr (2 byte, big-endian)
-                bytes.extend_from_slice(&header.param_addr.to_be_bytes());
-
-                // 6. Success (1 byte): sempre 0 per risposte normali
-                bytes.push(0);
-
-                // 7. Reserved (1 byte): sempre 0
-                bytes.push(0);
-
-                bytes
+            ProtocolResponse::Write => {
+                vec![]
             }
             ProtocolResponse::Error(_) => {
                 // Per gli errori, inviamo una risposta vuota
-                Vec::new()
+                vec![]
             }
         }
     }
@@ -239,23 +212,6 @@ impl ProtocolHandler {
         ProtocolResponse::Read { header, data }
     }
 
-    pub fn create_write_response(
-        chip_addr: u8,
-        data_len: u32,
-        param_addr: u16,
-    ) -> ProtocolResponse {
-        let header = ResponseHeader {
-            control_bit: CMD_RESP,
-            total_len: 13,
-            chip_addr,
-            data_len,
-            param_addr,
-            success: 0,
-            reserved: [0],
-        };
-        ProtocolResponse::Write { header }
-    }
-
     pub fn create_error_response(error: String) -> ProtocolResponse {
         ProtocolResponse::Error(error)
     }
@@ -280,7 +236,7 @@ mod tests {
         ];
         let (cmd, bytes_read) = ProtocolHandler::parse_command(&buf).unwrap();
 
-        assert_eq!(bytes_read, 12);
+        assert_eq!(bytes_read, 14);
         match cmd {
             ProtocolCommand::Read { header } => {
                 assert_eq!(header.control_bit, CMD_READ);
@@ -413,7 +369,7 @@ mod tests {
 
             let (cmd, bytes_read) = ProtocolHandler::parse_command(&buf).unwrap();
 
-            assert_eq!(bytes_read, 12);
+            assert_eq!(bytes_read, 14);
             match cmd {
                 ProtocolCommand::Read { header } => {
                     assert_eq!(header.control_bit, CMD_READ);
@@ -442,18 +398,6 @@ mod tests {
                 assert_eq!(data, vec![0x00, 0x00]);
             }
             _ => panic!("Expected Read response"),
-        }
-
-        let write_response = ProtocolHandler::create_write_response(0x01, 2, 0xf6f5);
-        match write_response {
-            ProtocolResponse::Write { header } => {
-                assert_eq!(header.control_bit, CMD_RESP);
-                assert_eq!(header.total_len, 13);
-                assert_eq!(header.chip_addr, 0x01);
-                assert_eq!(header.data_len, 2);
-                assert_eq!(header.param_addr, 0xf6f5);
-            }
-            _ => panic!("Expected Write response"),
         }
     }
 }

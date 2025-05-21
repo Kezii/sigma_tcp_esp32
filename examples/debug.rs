@@ -72,28 +72,6 @@ async fn handle_connection(mut stream: TcpStream, backend: Arc<Mutex<dyn Backend
 
             debug!("tx {:x?}", &response_bytes);
 
-            match response {
-                ProtocolResponse::Read { header, data } => {
-                    info!(
-                        "read at addr 0x{:04x} size {:?} resp {:02x?}",
-                        header.param_addr, header.data_len, data
-                    );
-
-                    stream.write_all(&response_bytes).await?;
-                    stream.flush().await?;
-                }
-                ProtocolResponse::Write { header } => {
-                    info!(
-                        "write at addr 0x{:04x} size {:?}",
-                        header.param_addr, header.data_len
-                    );
-                }
-                ProtocolResponse::Error(e) => {
-                    error!("Protocol error: {e}");
-                    //error!("{bytes:?}");
-                }
-            }
-
             println!();
         }
 
@@ -124,6 +102,11 @@ async fn process_command(
                     let mut backend = backend.lock().await;
                     let data = backend.read(header.param_addr, header.data_len).await?;
 
+                    info!(
+                        "read at addr 0x{:04x} size {:?} resp {:02x?}",
+                        header.param_addr, header.data_len, data
+                    );
+
                     ProtocolHandler::create_read_response(
                         header.chip_addr,
                         header.data_len,
@@ -135,11 +118,12 @@ async fn process_command(
                     let mut backend = backend.lock().await;
                     backend.write(header.param_addr, &data).await?;
 
-                    ProtocolHandler::create_write_response(
-                        header.chip_addr,
-                        header.data_len,
-                        header.param_addr,
-                    )
+                    info!(
+                        "write at addr 0x{:04x} size {:?}",
+                        header.param_addr, header.data_len
+                    );
+
+                    ProtocolResponse::Write
                 }
                 ProtocolCommand::Unknown(cmd) => {
                     error!("Unknown command: 0x{:02x}", cmd);

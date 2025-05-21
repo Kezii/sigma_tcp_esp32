@@ -74,9 +74,9 @@ fn main() -> Result<()> {
         let mut buf = [0u8; 1];
         match i2c_master.read(i, &mut buf, BLOCK) {
             Ok(_) => {
-                log::info!("Found I2C device at address: {:#04x}", i);
+                log::info!("Found I2C device at address: {i:#04x}");
             }
-            Err(e) => {
+            Err(_e) => {
                 // log::error!("Error reading I2C device at address {:#04x}: {:?}", i, e);
             }
         }
@@ -139,26 +139,8 @@ fn tcp_server(i2c: I2cDriver<'static>) -> Result<(), io::Error> {
                         processed_bytes += bytes_read;
                         let response_bytes = response.to_bytes();
 
-                        match response {
-                            ProtocolResponse::Read { header, data } => {
-                                info!(
-                                    "read at addr 0x{:04x} size {:?} resp {:02x?}",
-                                    header.param_addr, header.data_len, data
-                                );
-                                stream.write_all(&response_bytes).unwrap();
-                                stream.flush().unwrap();
-                            }
-                            ProtocolResponse::Write { header } => {
-                                info!(
-                                    "write at addr 0x{:04x} size {:?}",
-                                    header.param_addr, header.data_len
-                                );
-                            }
-                            ProtocolResponse::Error(e) => {
-                                error!("Protocol error: {e}");
-                                error!("{bytes:?}");
-                            }
-                        }
+                        stream.write_all(&response_bytes).unwrap();
+                        stream.flush().unwrap();
                     }
                     Err(e) => {
                         error!("Process command error: {e}");
@@ -193,6 +175,11 @@ fn process_command(
 
     match command {
         ProtocolCommand::Read { header } => {
+            info!(
+                "read at addr 0x{:04x} size {:?}",
+                header.param_addr, header.data_len
+            );
+
             let mut i2c = i2c.lock().unwrap();
 
             // Per leggere da un registro del DSP:
@@ -218,11 +205,10 @@ fn process_command(
                             bytes_read,
                         )),
                         Err(e) => {
-                            error!("I2C read failed: {:?}", e);
+                            error!("I2C read failed: {e:?}");
                             Ok((
                                 ProtocolHandler::create_error_response(format!(
-                                    "I2C read error: {:?}",
-                                    e
+                                    "I2C read error: {e:?}"
                                 )),
                                 bytes_read,
                             ))
@@ -230,11 +216,10 @@ fn process_command(
                     }
                 }
                 Err(e) => {
-                    error!("I2C write address failed: {:?}", e);
+                    error!("I2C write address failed: {e:?}");
                     Ok((
                         ProtocolHandler::create_error_response(format!(
-                            "I2C write address error: {:?}",
-                            e
+                            "I2C write address error: {e:?}"
                         )),
                         bytes_read,
                     ))
@@ -242,6 +227,11 @@ fn process_command(
             }
         }
         ProtocolCommand::Write { header, data } => {
+            info!(
+                "write at addr 0x{:04x} size {:?}",
+                header.param_addr, header.data_len
+            );
+
             let mut i2c = i2c.lock().unwrap();
 
             // Per scrivere a un registro del DSP:
@@ -253,27 +243,20 @@ fn process_command(
             write_buf.extend_from_slice(&data);
 
             match i2c.write(DSP_I2C_ADDR, &write_buf, BLOCK) {
-                Ok(_) => Ok((
-                    ProtocolHandler::create_write_response(
-                        header.chip_addr,
-                        header.data_len,
-                        header.param_addr,
-                    ),
-                    bytes_read,
-                )),
+                Ok(_) => Ok((ProtocolResponse::Write, bytes_read)),
                 Err(e) => {
-                    error!("I2C write failed: {:?}", e);
+                    error!("I2C write failed: {e:?}");
                     Ok((
-                        ProtocolHandler::create_error_response(format!("I2C write error: {:?}", e)),
+                        ProtocolHandler::create_error_response(format!("I2C write error: {e:?}")),
                         bytes_read,
                     ))
                 }
             }
         }
         ProtocolCommand::Unknown(cmd) => {
-            error!("Unknown command: 0x{:02x}", cmd);
+            error!("Unknown command: 0x{cmd:02x}");
             Ok((
-                ProtocolHandler::create_error_response(format!("Unknown command: 0x{:02x}", cmd)),
+                ProtocolHandler::create_error_response(format!("Unknown command: 0x{cmd:02x}")),
                 bytes_read,
             ))
         }
