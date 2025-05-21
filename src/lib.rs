@@ -1,5 +1,5 @@
 use anyhow::Result;
-use log::{info, error};
+use log::{error, info};
 
 pub const CMD_READ: u8 = 0x0a;
 pub const CMD_WRITE: u8 = 0x09;
@@ -81,13 +81,8 @@ impl ResponseHeader {
 
 #[derive(Debug)]
 pub enum ProtocolCommand {
-    Read {
-        header: RequestHeader,
-    },
-    Write {
-        header: WriteHeader,
-        data: Vec<u8>,
-    },
+    Read { header: RequestHeader },
+    Write { header: WriteHeader, data: Vec<u8> },
     Unknown(u8),
 }
 
@@ -106,7 +101,7 @@ pub enum ProtocolResponse {
 pub struct ProtocolHandler;
 
 impl ProtocolHandler {
-    pub fn parse_command(buf: &[u8]) -> Result<ProtocolCommand> {
+    pub fn parse_command(buf: &[u8]) -> Result<(ProtocolCommand, usize)> {
         if buf.is_empty() {
             return Err(anyhow::anyhow!("Empty buffer"));
         }
@@ -115,7 +110,14 @@ impl ProtocolHandler {
             CMD_READ => {
                 if buf.len() >= 12 {
                     let header = RequestHeader::from_bytes(buf)?;
-                    Ok(ProtocolCommand::Read { header })
+                    let packet_len = header.total_len as usize;
+                    if buf.len() >= packet_len {
+                        Ok((ProtocolCommand::Read { header }, packet_len))
+                    } else {
+                        // Se il buffer è più corto di total_len, usiamo la lunghezza minima richiesta
+                        // per parsare l'header, il comando è valido ma il pacchetto potrebbe essere troncato
+                        Ok((ProtocolCommand::Read { header }, 12))
+                    }
                 } else {
                     Err(anyhow::anyhow!("Buffer too short for read command"))
                 }
@@ -123,9 +125,10 @@ impl ProtocolHandler {
             CMD_WRITE => {
                 if buf.len() >= 14 {
                     let header = WriteHeader::from_bytes(buf)?;
-                    if buf.len() >= 14 + header.data_len as usize {
+                    let required_len = header.total_len as usize;
+                    if buf.len() >= required_len {
                         let data = buf[14..14 + header.data_len as usize].to_vec();
-                        Ok(ProtocolCommand::Write { header, data })
+                        Ok((ProtocolCommand::Write { header, data }, required_len))
                     } else {
                         Err(anyhow::anyhow!("Buffer too short for write data"))
                     }
@@ -133,11 +136,16 @@ impl ProtocolHandler {
                     Err(anyhow::anyhow!("Buffer too short for write command"))
                 }
             }
-            cmd => Ok(ProtocolCommand::Unknown(cmd)),
+            cmd => Ok((ProtocolCommand::Unknown(cmd), 1)),
         }
     }
 
-    pub fn create_read_response(chip_addr: u8, data_len: u32, param_addr: u16, data: Vec<u8>) -> ProtocolResponse {
+    pub fn create_read_response(
+        chip_addr: u8,
+        data_len: u32,
+        param_addr: u16,
+        data: Vec<u8>,
+    ) -> ProtocolResponse {
         let header = ResponseHeader {
             control_bit: CMD_RESP,
             total_len: 13 + data.len() as u32,
@@ -150,7 +158,11 @@ impl ProtocolHandler {
         ProtocolResponse::Read { header, data }
     }
 
-    pub fn create_write_response(chip_addr: u8, data_len: u32, param_addr: u16) -> ProtocolResponse {
+    pub fn create_write_response(
+        chip_addr: u8,
+        data_len: u32,
+        param_addr: u16,
+    ) -> ProtocolResponse {
         let header = ResponseHeader {
             control_bit: CMD_RESP,
             total_len: 13,
@@ -168,10 +180,6 @@ impl ProtocolHandler {
     }
 }
 
-
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,10 +195,11 @@ mod tests {
             0x01, // chip_addr = 1 (IC 1)
             0x00, 0x00, 0x00, 0x02, // data_len = 2
             0xf6, 0xfb, // param_addr = 0xf6fb (SPDIF_TX_VB_RIGHT_11)
-            0x00, 0x00  // trailing bytes
+            0x00, 0x00, // trailing bytes
         ];
-        let cmd = ProtocolHandler::parse_command(&buf).unwrap();
-        
+        let (cmd, bytes_read) = ProtocolHandler::parse_command(&buf).unwrap();
+
+        assert_eq!(bytes_read, 12);
         match cmd {
             ProtocolCommand::Read { header } => {
                 assert_eq!(header.control_bit, CMD_READ);
@@ -215,10 +224,11 @@ mod tests {
             0x01, // chip_addr = 1
             0x00, 0x00, 0x00, 0x02, // data_len = 2
             0xf0, 0x00, // param_addr = 0xf000
-            0x00, 0x00  // data payload
+            0x00, 0x00, // data payload
         ];
-        let cmd = ProtocolHandler::parse_command(&buf).unwrap();
-        
+        let (cmd, bytes_read) = ProtocolHandler::parse_command(&buf).unwrap();
+
+        assert_eq!(bytes_read, 16);
         match cmd {
             ProtocolCommand::Write { header, data } => {
                 assert_eq!(header.control_bit, CMD_WRITE);
@@ -247,10 +257,11 @@ mod tests {
             0x01, // chip_addr = 1 (IC 1)
             0x00, 0x00, 0x00, 0x02, // data_len = 2
             0xf0, 0x20, // param_addr = 0xf020
-            0x00, 0x08  // data payload: [0x00, 0x08]
+            0x00, 0x08, // data payload: [0x00, 0x08]
         ];
-        let cmd = ProtocolHandler::parse_command(&buf).unwrap();
-        
+        let (cmd, bytes_read) = ProtocolHandler::parse_command(&buf).unwrap();
+
+        assert_eq!(bytes_read, 16);
         match cmd {
             ProtocolCommand::Write { header, data } => {
                 assert_eq!(header.control_bit, CMD_WRITE);
@@ -271,7 +282,7 @@ mod tests {
         // Example from program:
         // Block Write to IC 1, Param Address: 0x0000 (DM0 Data), Bytes: 80 (all zeros)
         // [2025-05-20T19:16:28Z DEBUG sigma_tcp_rs] rx [9, 0, 0, 0, 0, 0, 5e, 1, 0, 0, 0, 50, 0, 0, ...]
-        
+
         // Create our test buffer with 14-byte header + 80 bytes of zeros
         let mut buf = vec![
             0x09, // CMD_WRITE
@@ -282,12 +293,13 @@ mod tests {
             0x00, 0x00, 0x00, 0x50, // data_len = 80 (0x50)
             0x00, 0x00, // param_addr = 0x0000 (DM0 Data)
         ];
-        
+
         // Add 80 bytes of zeros for the data payload
         buf.extend(vec![0x00; 80]);
-        
-        let cmd = ProtocolHandler::parse_command(&buf.as_slice()).unwrap();
-        
+
+        let (cmd, bytes_read) = ProtocolHandler::parse_command(&buf.as_slice()).unwrap();
+
+        assert_eq!(bytes_read, 94);
         match cmd {
             ProtocolCommand::Write { header, data } => {
                 assert_eq!(header.control_bit, CMD_WRITE);
@@ -297,7 +309,7 @@ mod tests {
                 assert_eq!(header.chip_addr, 0x01);
                 assert_eq!(header.data_len, 0x50);
                 assert_eq!(header.param_addr, 0x0000);
-                
+
                 // Verify data is 80 zeros
                 assert_eq!(data.len(), 80);
                 assert!(data.iter().all(|&b| b == 0x00));
@@ -310,14 +322,17 @@ mod tests {
     fn test_read_command_sequence() {
         // Test sequence of read commands from logs
         let addresses = [0xf6f5, 0xf6f6, 0xf6f7, 0xf6f8, 0xf6f9, 0xf6fa, 0xf6fb];
-        
+
         for addr in addresses {
-            let mut buf = [0x0a, 0x00, 0x00, 0x00, 0x0e, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00];
+            let mut buf = [
+                0x0a, 0x00, 0x00, 0x00, 0x0e, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
+            ];
             buf[10] = (addr >> 8) as u8;
             buf[11] = addr as u8;
-            
-            let cmd = ProtocolHandler::parse_command(&buf).unwrap();
-            
+
+            let (cmd, bytes_read) = ProtocolHandler::parse_command(&buf).unwrap();
+
+            assert_eq!(bytes_read, 12);
             match cmd {
                 ProtocolCommand::Read { header } => {
                     assert_eq!(header.control_bit, CMD_READ);
@@ -334,7 +349,8 @@ mod tests {
     #[test]
     fn test_response_creation() {
         // Test response creation for both read and write
-        let read_response = ProtocolHandler::create_read_response(0x01, 2, 0xf6f5, vec![0x00, 0x00]);
+        let read_response =
+            ProtocolHandler::create_read_response(0x01, 2, 0xf6f5, vec![0x00, 0x00]);
         match read_response {
             ProtocolResponse::Read { header, data } => {
                 assert_eq!(header.control_bit, CMD_RESP);
@@ -359,4 +375,4 @@ mod tests {
             _ => panic!("Expected Write response"),
         }
     }
-} 
+}
