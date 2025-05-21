@@ -1,4 +1,4 @@
-# SIGMA_TCP_RS
+# SIGMA_TCP Rust implementation for ESP32
 
 Rust implementation for Analog Devices SigmaStudio's TCP protocol.
 
