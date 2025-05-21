@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 
 mod backend;
 
-use backend::debug::DebugBackend;
+use backend::debug::{self, DebugBackend};
 use backend::Backend;
 
 const PORT: u16 = 8086;
@@ -68,19 +68,34 @@ async fn handle_connection(mut stream: TcpStream, backend: Arc<Mutex<dyn Backend
             
             processed_bytes += bytes_read;
             
+
+            let response_bytes = response.to_bytes();
+
+            debug!("tx {:x?}", &response_bytes);
+
+
+
+
             match response {
                 ProtocolResponse::Read { header, data } => {
-                    let mut response = header.to_bytes();
-                    response.extend(data);
-                    stream.write_all(&response).await?;
+                    info!("read at addr 0x{:04x} size {:?} resp {:02x?}", header.param_addr, header.data_len, data);
+
+                    stream.write_all(&response_bytes).await?;
+                    stream.flush().await?;
+
+
                 }
                 ProtocolResponse::Write { header } => {
-                    stream.write_all(&header.to_bytes()).await?;
+                    info!("write at addr 0x{:04x} size {:?}", header.param_addr, header.data_len);
                 }
                 ProtocolResponse::Error(e) => {
-                    error!("Protocol error: {}", e);
+                    error!("Protocol error: {e}");
+                    //error!("{bytes:?}");
                 }
             }
+
+            println!();
+
         }
         
         // Sposta i dati non processati all'inizio del buffer

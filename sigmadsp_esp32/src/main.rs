@@ -127,7 +127,8 @@ fn tcp_server(i2c: I2cDriver<'static>) -> Result<(), io::Error> {
             let mut processed_bytes = 0;
             while processed_bytes < count {
                 //info!("Processing bytes: {:?}", &buf[processed_bytes..count]);
-                let result = process_command(&buf[processed_bytes..count], &i2c);
+                let bytes = &buf[processed_bytes..count];
+                let result = process_command(bytes, &i2c);
                 match result {
                     Ok((response, bytes_read)) => {
                         if bytes_read == 0 {
@@ -136,23 +137,26 @@ fn tcp_server(i2c: I2cDriver<'static>) -> Result<(), io::Error> {
                         }
 
                         processed_bytes += bytes_read;
+                        let response_bytes = response.to_bytes();
 
                         match response {
                             ProtocolResponse::Read { header, data } => {
-                                let mut response = header.to_bytes();
-                                response.extend(data);
-                                stream.write_all(&response).unwrap();
+                                info!("read at addr 0x{:04x} size {:?} resp {:02x?}", header.param_addr, header.data_len, data);
+                                stream.write_all(&response_bytes).unwrap();
+                                stream.flush().unwrap();
                             }
                             ProtocolResponse::Write { header } => {
-                                stream.write_all(&header.to_bytes()).unwrap();
+                                info!("write at addr 0x{:04x} size {:?}", header.param_addr, header.data_len);
                             }
                             ProtocolResponse::Error(e) => {
-                                error!("Protocol error: {}", e);
+                                error!("Protocol error: {e}");
+                                error!("{bytes:?}");
                             }
                         }
                     }
                     Err(e) => {
-                        error!("Process command error: {}", e);
+                        error!("Process command error: {e}");
+                        error!("{bytes:?}");
                         // In caso di errore, interrompiamo l'elaborazione
                         break;
                     }
@@ -199,7 +203,6 @@ fn process_command(
                     let mut data = vec![0u8; header.data_len as usize];
                     match i2c.read(DSP_I2C_ADDR, &mut data, BLOCK) {
                         Ok(_) => {
-                            info!("Read successful: {:?}", data);
                             Ok((
                                 ProtocolHandler::create_read_response(
                                     header.chip_addr,
@@ -247,10 +250,6 @@ fn process_command(
 
             match i2c.write(DSP_I2C_ADDR, &write_buf, BLOCK) {
                 Ok(_) => {
-                    info!(
-                        "Write successful: addr={:#06x}, data={:?}",
-                        header.param_addr, data
-                    );
                     Ok((
                         ProtocolHandler::create_write_response(
                             header.chip_addr,

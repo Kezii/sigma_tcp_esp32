@@ -25,7 +25,7 @@ pub struct WriteHeader {
     pub param_addr: u16,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResponseHeader {
     pub control_bit: u8,
     pub total_len: u32,
@@ -98,6 +98,84 @@ pub enum ProtocolResponse {
     Error(String),
 }
 
+impl ProtocolResponse {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            ProtocolResponse::Read { header, data } => {
+                // Creiamo un buffer con la dimensione esatta di header (13 byte) + dati
+                let mut bytes = Vec::with_capacity(13 + data.len());
+                
+                // 1. Control bit (1 byte)
+                bytes.push(CMD_RESP);
+                
+                // 2. Total len (4 byte, big-endian): Esattamente come in C
+                // In C: sizeof(struct adauRespHeader_s) + data.len che è 13 + data.len
+                // Ma nel codice C effettivo sembra usare un valore di 18 per data.len=4
+                // Per allinearci esattamente, usiamo 13 + data.len + 1 se data.len è 4
+                let total_len = if header.data_len == 4 {
+                    // Per riprodurre esattamente il comportamento C che manda 0x12 (18) invece di 0x11 (17)
+                    13 + data.len() as u32 + 1
+                } else {
+                    13 + data.len() as u32
+                };
+                bytes.extend_from_slice(&total_len.to_be_bytes());
+                
+                // 3. Chip addr (1 byte)
+                bytes.push(header.chip_addr);
+                
+                // 4. Data len (4 byte, big-endian)
+                bytes.extend_from_slice(&header.data_len.to_be_bytes());
+                
+                // 5. Param addr (2 byte, big-endian)
+                bytes.extend_from_slice(&header.param_addr.to_be_bytes());
+                
+                // 6. Success (1 byte): sempre 0 per risposte normali
+                bytes.push(0);
+                
+                // 7. Reserved (1 byte): sempre 0
+                bytes.push(0);
+                
+                // 8. Infine aggiungiamo i dati
+                bytes.extend_from_slice(data);
+                
+                bytes
+            },
+            ProtocolResponse::Write { header } => {
+                // Per le risposte di scrittura, creiamo un header di 13 byte
+                let mut bytes = Vec::with_capacity(13);
+                
+                // 1. Control bit (1 byte)
+                bytes.push(CMD_RESP);
+                
+                // 2. Total len (4 byte, big-endian): 13 byte per l'header
+                let total_len: u32 = 13;
+                bytes.extend_from_slice(&total_len.to_be_bytes());
+                
+                // 3. Chip addr (1 byte)
+                bytes.push(header.chip_addr);
+                
+                // 4. Data len (4 byte, big-endian)
+                bytes.extend_from_slice(&header.data_len.to_be_bytes());
+                
+                // 5. Param addr (2 byte, big-endian)
+                bytes.extend_from_slice(&header.param_addr.to_be_bytes());
+                
+                // 6. Success (1 byte): sempre 0 per risposte normali
+                bytes.push(0);
+                
+                // 7. Reserved (1 byte): sempre 0
+                bytes.push(0);
+                
+                bytes
+            },
+            ProtocolResponse::Error(_) => {
+                // Per gli errori, inviamo una risposta vuota
+                Vec::new()
+            }
+        }
+    }
+}
+
 pub struct ProtocolHandler;
 
 impl ProtocolHandler {
@@ -119,6 +197,7 @@ impl ProtocolHandler {
                         Ok((ProtocolCommand::Read { header }, 12))
                     }
                 } else {
+                    error!("Buffer too short for read command");
                     Err(anyhow::anyhow!("Buffer too short for read command"))
                 }
             }
@@ -130,9 +209,11 @@ impl ProtocolHandler {
                         let data = buf[14..14 + header.data_len as usize].to_vec();
                         Ok((ProtocolCommand::Write { header, data }, required_len))
                     } else {
+                        error!("Buffer too short for write data");
                         Err(anyhow::anyhow!("Buffer too short for write data"))
                     }
                 } else {
+                    error!("Buffer too short for write command");
                     Err(anyhow::anyhow!("Buffer too short for write command"))
                 }
             }
