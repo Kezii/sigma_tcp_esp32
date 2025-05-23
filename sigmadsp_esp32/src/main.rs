@@ -62,11 +62,10 @@ fn main() -> Result<()> {
         peripherals.i2c0,
         peripherals.pins.gpio2.into(),
         peripherals.pins.gpio3.into(),
-        100.kHz().into(),
+        400.kHz().into(),
     )?;
 
-    log::info!("I2C initialized at 100kHz");
-    log::info!("Hello, world!");
+    log::info!("I2C initialized");
 
     // scan all I2C devices
 
