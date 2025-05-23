@@ -70,15 +70,27 @@ fn main() -> Result<()> {
 
     // scan all I2C devices
 
-    for i in 0..127 {
-        let mut buf = [0u8; 1];
-        match i2c_master.read(i, &mut buf, BLOCK) {
-            Ok(_) => {
-                log::info!("Found I2C device at address: {i:#04x}");
+    loop {
+        let mut found = false;
+
+        for i in 0..127 {
+            let mut buf = [0u8; 1];
+            match i2c_master.read(i, &mut buf, BLOCK) {
+                Ok(_) => {
+                    log::info!("Found I2C device at address: {i:#04x}");
+                    found = true;
+                }
+                Err(_e) => {
+                    // log::error!("Error reading I2C device at address {:#04x}: {:?}", i, e);
+                }
             }
-            Err(_e) => {
-                // log::error!("Error reading I2C device at address {:#04x}: {:?}", i, e);
-            }
+        }
+
+        if found {
+            break;
+        } else {
+            log::error!("No I2C devices found");
+            std::thread::sleep(std::time::Duration::from_secs(1));
         }
     }
 
@@ -112,7 +124,10 @@ fn tcp_server(i2c: I2cDriver<'static>) -> Result<(), io::Error> {
     }
 
     fn handle(mut stream: TcpStream, i2c: std::sync::Arc<std::sync::Mutex<I2cDriver<'static>>>) {
-        let mut buf = [0u8; 1024];
+        // we size the buffer to the size of the ADAU1452 memory partition
+        // this is very wasteful, a proper implementation would just stream the data
+        let mut buf = Box::new([0u8; 20480 * 4 + 14]);
+
         let mut count = 0;
 
         loop {
@@ -144,7 +159,7 @@ fn tcp_server(i2c: I2cDriver<'static>) -> Result<(), io::Error> {
                     }
                     Err(e) => {
                         error!("Process command error: {e}");
-                        error!("{bytes:?}");
+                        //error!("{bytes:?}");
                         // In caso di errore, interrompiamo l'elaborazione
                         break;
                     }

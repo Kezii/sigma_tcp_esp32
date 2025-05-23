@@ -170,7 +170,10 @@ impl ProtocolHandler {
                         Ok((ProtocolCommand::Read { header }, 12))
                     }
                 } else {
-                    error!("Buffer too short for read command");
+                    error!(
+                        "Buffer too short for read command, expected at least 12 bytes, got {}",
+                        buf.len()
+                    );
                     Err(anyhow::anyhow!("Buffer too short for read command"))
                 }
             }
@@ -182,11 +185,18 @@ impl ProtocolHandler {
                         let data = buf[14..14 + header.data_len as usize].to_vec();
                         Ok((ProtocolCommand::Write { header, data }, required_len))
                     } else {
-                        error!("Buffer too short for write data");
+                        error!(
+                            "Buffer too short for write data, expected {} bytes, got {}",
+                            header.data_len,
+                            buf.len() - 14
+                        );
                         Err(anyhow::anyhow!("Buffer too short for write data"))
                     }
                 } else {
-                    error!("Buffer too short for write command");
+                    error!(
+                        "Buffer too short for write command, expected at least 14 bytes, got {}",
+                        buf.len()
+                    );
                     Err(anyhow::anyhow!("Buffer too short for write command"))
                 }
             }
