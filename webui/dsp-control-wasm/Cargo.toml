@@ -1,0 +1,35 @@
+[package]
+name = "dsp-control-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "console",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "Node",
+    "Window",
+    "HtmlInputElement",
+    "Event",
+    "EventTarget",
+    "Response",
+    "RequestInit",
+    "RequestMode",
+    "Request",
+    "Headers",
+    "DomTokenList",
+    "CssStyleDeclaration"
+] }
+serde-wasm-bindgen = "0.6"
+log = "0.4"
+wasm-logger = "0.2" 
+wasm-bindgen-futures = "0.4.50"
